@@ -64,7 +64,16 @@ def charge_tag_or_decline(tag: Tag, fee: Decimal) -> GateOutcome:
     if tag.balance >= fee:
         tag.balance -= fee
         return GateOutcome(Decision.CHARGED, PayMode.TAG, fee, ZERO, tag.balance, tag.status)
+    return decline_cash(tag, fee)
 
+
+def decline_cash(tag: Tag, fee: Decimal) -> GateOutcome:
+    """Low balance: the tag is declined, the vehicle pays 2x `fee` in cash, tag -> LOW_BALANCE.
+
+    Split out so Member A's engine can decline on `fee` while testing the balance against
+    `fee + mismatch penalty`.
+    """
+    fee = round_paisa(fee)
     cash = double_fee(fee)
     if tag.status not in (Status.BLACKLISTED, Status.HOTLISTED):
         tag.status = Status.LOW_BALANCE

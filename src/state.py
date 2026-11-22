@@ -46,6 +46,10 @@ class EngineState:
         self.reversal_log: List[ReversalRecord] = []       # accepted reversals
         self.settlement_rows: List[SettlementRow] = []     # one block per PRINT_SETTLEMENT
 
+        # Memory of the decision engine (AVC mismatch history, return-journey windows).
+        # It lives here so it is created once per run and never rebuilt per transaction.
+        self.engine_memory: Dict[str, object] = {}
+
     # ----- lookups
     def get_tag(self, tag_id: str) -> Optional[Tag]:
         return self.tags.get(tag_id)

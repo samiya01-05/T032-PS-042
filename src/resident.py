@@ -1,19 +1,24 @@
 """BR-04: local resident exemption (EC-05 and the exactly-20.0-km case)."""
-from decimal import Decimal
+from __future__ import annotations
 
-LIMIT_KM = Decimal("20")
-
-
-def is_commercial(tag, charged_class: str) -> bool:
-    """Commercial = the tag is flagged commercial OR the class is not CAR."""
-    return bool(tag.commercial) or charged_class != "CAR"
+from src import rules_config as cfg
+from src.models import Tag
 
 
-def resident_eligible(tag, commercial: bool, distance_km, resident_pass) -> bool:
+def is_commercial(tag: Tag, charged_class: str) -> bool:
+    """Commercial = the tag is flagged commercial, or (default) the charged class is not CAR."""
+    if tag.commercial:
+        return True
+    return cfg.COMMERCIAL_BY_CHARGED_CLASS and charged_class != "CAR"
+
+
+def resident_eligible(tag: Tag, plaza_id: str, commercial: bool, resident_pass) -> bool:
+    """All five must hold: resident flag, this plaza, <= 20 km, non-commercial, valid pass."""
     return bool(
-        tag.resident
+        tag.resident_flag
+        and tag.resident_plaza_id == plaza_id
+        and tag.resident_distance_km is not None
+        and tag.resident_distance_km <= cfg.RESIDENT_LIMIT_KM      # exactly 20.0 km qualifies
         and not commercial
-        and resident_pass is not None           # a valid pass for THIS plaza and date
-        and distance_km is not None
-        and Decimal(str(distance_km)) <= LIMIT_KM   # exactly 20.0 km qualifies
+        and resident_pass is not None
     )

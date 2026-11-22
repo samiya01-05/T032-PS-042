@@ -1,88 +1,273 @@
-"""Shared data model (write together with Member B, then freeze).
-
-All money is Decimal. money() is the ONLY place where rounding happens.
 """
-from dataclasses import dataclass, field
-from datetime import datetime
+models.py  --  SHARED by Member A and Member B (agree on this on day 1, then freeze).
+
+Holds the plain data containers (dataclasses), the allowed text values
+(Decision, PayMode, ...), and tiny money/time helpers.
+
+Rule of thumb: ALL money is a decimal.Decimal, never a float.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
-from typing import List, Optional
+from typing import Optional
 
-# Lowest to highest. A "higher" class is one that appears later in this list.
+TS_FORMAT = "%Y-%m-%d %H:%M:%S"
+DATE_FORMAT = "%Y-%m-%d"
+
+# Cheapest -> most expensive class. A uses this to say "detected class is higher".
 CLASS_ORDER = ["CAR", "LCV", "BUS_TRUCK", "3_AXLE", "4-6_AXLE", "OVERSIZE"]
-ZERO = Decimal("0.00")
 
-# Separator used when several rule ids are written into the rule_ids column.
+CONCESSIONAIRE_ID = "CONCESSIONAIRE"
+
+# Separator inside the rule_ids column of decision_log.csv (e.g. "BR-01;BR-02;BR-10").
 RULE_SEP = ";"
 
-# Decision values (confirm the exact spelling against your README enums).
-HOTLIST_REJECTED = "REJECTED"
-BLACKLIST_CASH = "BLACKLIST_CASH"
-WAIVED = "WAIVED"
-PASS = "PASS"
-RESIDENT = "RESIDENT"
-CHARGED = "CHARGED"
-DECLINED_CASH = "DECLINED_CASH"
 
-
-def rank(cls: str) -> int:
-    """Position of a vehicle class in CLASS_ORDER (unknown class -> clear error)."""
+def rank(vehicle_class: str) -> int:
+    """Position of a class in CLASS_ORDER (0 = CAR). Raises a clear error for unknown classes."""
     try:
-        return CLASS_ORDER.index(cls)
+        return CLASS_ORDER.index(vehicle_class)
     except ValueError:
-        raise ValueError(f"Unknown vehicle class: {cls!r}") from None
+        raise ValueError(f"Unknown vehicle class: {vehicle_class!r}") from None
 
 
-def money(x) -> Decimal:
-    """Round to 2 decimals, half-up. The only rounding function in the project."""
-    return Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+class Status:
+    ACTIVE = "ACTIVE"
+    LOW_BALANCE = "LOW_BALANCE"
+    BLACKLISTED = "BLACKLISTED"
+    HOTLISTED = "HOTLISTED"
+
+
+class Decision:
+    CHARGED = "CHARGED"
+    PASS = "PASS"
+    RESIDENT = "RESIDENT"
+    WAIVED = "WAIVED"
+    DECLINED_CASH = "DECLINED_CASH"
+    BLACKLIST_CASH = "BLACKLIST_CASH"
+    REJECTED = "REJECTED"
+
+
+class PayMode:
+    TAG = "TAG"
+    CASH = "CASH"
+    NONE = "NONE"
+
+
+class DiscountType:
+    RETURN = "RETURN"
+    NIGHT = "NIGHT"
+    RETURN_NIGHT = "RETURN+NIGHT"
+    NONE = "NONE"
+
+
+class EventResult:
+    """Values for the `result` column of tag_events.csv."""
+    SUCCESS = "SUCCESS"      # top-up accepted
+    REFUNDED = "REFUNDED"    # reversal accepted (within 48 h)
+    DISPUTE = "DISPUTE"      # reversal after 48 h -> logged, not refunded
+    REJECTED = "REJECTED"    # anything refused
+
+
+# ---------------------------------------------------------------- money / time helpers
+def money(value) -> Decimal:
+    """Turn '85.00' / 85 / Decimal into a Decimal (no float surprises)."""
+    return Decimal(str(value).strip())
+
+
+def round_paisa(value) -> Decimal:
+    """Round half-up to 2 decimals (the one and only rounding rule)."""
+    return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def fmt_money(value) -> str:
+    """Decimal -> '85.00' (always 2 places, no commas, no symbol)."""
+    return format(round_paisa(value), "f")
+
+
+def parse_ts(text: str) -> datetime:
+    return datetime.strptime(text.strip(), TS_FORMAT)
+
+
+def parse_date(text: str) -> date:
+    return datetime.strptime(text.strip(), DATE_FORMAT).date()
+
+
+def fmt_ts(value: datetime) -> str:
+    return value.strftime(TS_FORMAT)
+
+
+# ---------------------------------------------------------------- reference data
+@dataclass
+class Bank:
+    bank_id: str
+    bank_name: str
+
+
+@dataclass
+class Plaza:
+    plaza_id: str
+    plaza_name: str
+    highway: str
+    nearest_plaza_km: Decimal
+
+
+@dataclass
+class Tariff:
+    plaza_id: str
+    vehicle_class: str
+    single_journey_fee: Decimal
+    monthly_pass_fee: Decimal
 
 
 @dataclass
 class Tag:
+    """Mutable: balance and status change while commands are processed."""
     tag_id: str
+    vehicle_no: str
     vehicle_class: str
-    bank: str
+    commercial: bool
+    issuer_bank: str
     balance: Decimal
-    status: str                      # ACTIVE / LOW_BALANCE / BLACKLISTED / HOTLISTED
-    resident: bool = False
-    commercial: bool = False         # the tag's own commercial flag (if the CSV has one)
-    distance_km: Optional[Decimal] = None   # residence distance to the plaza
-    reverify: bool = False
+    status: str
+    resident_flag: bool
+    resident_plaza_id: Optional[str]
+    resident_distance_km: Optional[Decimal]
 
 
 @dataclass
-class Txn:
-    txn_id: str
-    ts: datetime
+class Pass:
+    pass_id: str
     tag_id: str
+    plaza_id: str
+    pass_type: str                    # COMMUTER_50 or RESIDENT_MONTHLY
+    purchase_date: date
+    valid_to: date
+    journeys_total: Optional[int]     # COMMUTER_50 only
+    journeys_used: Optional[int]      # starts at journeys_used_opening
+    amount_paid: Decimal
+
+
+@dataclass
+class AvcEvent:
+    tag_id: str
+    ts: datetime
     plaza_id: str
     detected_class: str
-    queue_s: float = 0
-    queue_flag: bool = False
-    distance_km: Optional[Decimal] = None   # overrides Tag.distance_km when given
+
+
+# ---------------------------------------------------------------- commands (parser output)
+@dataclass
+class TxnCommand:
+    line_no: int
+    txn_id: str
+    ts: datetime
+    plaza_id: str
+    lane: Optional[str]
+    tag_id: str
+    avc_class: Optional[str]
+    queue_s: Optional[Decimal]
+    queue_flag: bool
 
 
 @dataclass
-class Result:
-    """One decision_log row (17 columns) plus what settlement needs."""
+class TopupCommand:
+    line_no: int
+    tag_id: str
+    ts: datetime
+    amount: Decimal
+
+
+@dataclass
+class ReverseCommand:
+    line_no: int
     txn_id: str
     ts: datetime
-    tag_id: str
+
+
+@dataclass
+class PrintLogCommand:
+    line_no: int
+    day: date
+
+
+@dataclass
+class PrintSettlementCommand:
+    line_no: int
+    day: date
+
+
+# ---------------------------------------------------------------- results
+@dataclass
+class TxnResult:
+    """One decision_log row. Member A builds it; Member B stores/settles it."""
+    txn_id: str
+    ts: datetime
     plaza_id: str
+    tag_id: str
     tag_class: str
-    detected_class: str
-    charged_class: str
-    base_fee: Decimal = ZERO
-    discount_type: str = "NONE"
-    discount_amount: Decimal = ZERO
-    penalty: Decimal = ZERO
-    amount: Decimal = ZERO
-    payment_mode: str = "NONE"       # NONE / TAG / CASH
-    decision: str = ""
-    balance_after: Decimal = ZERO
-    tag_status_after: str = ""
-    rules: List[str] = field(default_factory=list)
+    avc_class: Optional[str]
+    charged_class: Optional[str]
+    base_fee: Decimal
+    discount_type: str
+    discount_amount: Decimal
+    penalty: Decimal
+    amount: Decimal
+    payment_mode: str
+    decision: str
+    balance_after: Decimal
+    tag_status_after: str
+    rule_ids: str
+    bank_id: str = ""
+    reversed: bool = False
 
     @property
-    def rule_ids(self) -> str:
-        return RULE_SEP.join(self.rules)
+    def tag_amount(self) -> Decimal:
+        """Money actually taken from the tag (what the bank settles)."""
+        if self.payment_mode == PayMode.TAG and self.decision == Decision.CHARGED:
+            return self.amount
+        return Decimal("0.00")
+
+    @property
+    def cash_amount(self) -> Decimal:
+        """Money collected in cash at the lane (100% concessionaire revenue)."""
+        if self.payment_mode == PayMode.CASH:
+            return self.amount
+        return Decimal("0.00")
+
+
+@dataclass
+class TagEvent:
+    """One tag_events.csv row (a TOPUP or REVERSE outcome)."""
+    ts: datetime
+    command: str                       # TOPUP or REVERSE
+    reference: str                     # tag_id for TOPUP, txn_id for REVERSE
+    result: str
+    amount: Optional[Decimal]
+    balance_after: Optional[Decimal]
+    reason: str
+
+
+@dataclass
+class ReversalRecord:
+    """Remembers an accepted reversal so settlement can take it back out."""
+    day: date                          # date the REVERSE command ran
+    txn_id: str
+    bank_id: str
+    amount: Decimal                    # refunded to the tag
+    net_value: Decimal                 # amount - bank_fee - switch_fee of that txn
+
+
+@dataclass
+class SettlementRow:
+    day: date
+    party_id: str
+    successful_txns: int
+    gross_tag_amount: Decimal
+    bank_fee: Decimal
+    switch_fee: Decimal
+    reversals: Decimal
+    cash_penalties: Decimal
+    net_amount: Decimal

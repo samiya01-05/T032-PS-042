@@ -1,7 +1,14 @@
-"""BR-01: fee lookup by plaza and vehicle class, plus class comparison."""
+"""BR-01: charged class and fee lookup (Member A).
+
+The fee table itself is loaded by Member B (state.tariffs); this module decides WHICH
+class is charged and reads the fee through state.fee_for().
+"""
+from __future__ import annotations
+
 from decimal import Decimal
 
-from models import rank
+from src.models import rank
+from src.state import EngineState
 
 
 def is_higher(detected: str, registered: str) -> bool:
@@ -12,13 +19,6 @@ def is_lower(detected: str, registered: str) -> bool:
     return rank(detected) < rank(registered)
 
 
-class Tariff:
-    def __init__(self, rows):
-        """rows: iterable of (plaza_id, vehicle_class, single_fee)."""
-        self.fees = {(p, c): Decimal(str(f)) for p, c, f in rows}
-
-    def fee(self, plaza_id: str, cls: str) -> Decimal:
-        try:
-            return self.fees[(plaza_id, cls)]
-        except KeyError:
-            raise KeyError(f"No tariff for plaza={plaza_id!r}, class={cls!r}") from None
+def base_fee(state: EngineState, plaza_id: str, charged_class: str) -> Decimal:
+    """Single-journey fee of `charged_class` at `plaza_id` (BR-01)."""
+    return state.fee_for(plaza_id, charged_class)

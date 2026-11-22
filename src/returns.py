@@ -1,7 +1,9 @@
 """BR-02: return-journey window per (tag, plaza). 50% off, once per 24 hours."""
+from __future__ import annotations
+
 from datetime import timedelta
 
-DAY = timedelta(hours=24)
+from src import rules_config as cfg
 
 
 class ReturnTracker:
@@ -9,9 +11,14 @@ class ReturnTracker:
         self.anchor = {}        # (tag_id, plaza_id) -> time of the "first" crossing
 
     def active(self, key, ts) -> bool:
-        """True if a return discount is available now. Exactly 24h still counts (EC-01)."""
+        """True if a return discount is available now (exactly 24 h still counts: EC-01)."""
         a = self.anchor.get(key)
-        return a is not None and timedelta(0) <= ts - a <= DAY
+        if a is None:
+            return False
+        gap = ts - a
+        if gap < timedelta(0):
+            return False
+        return gap <= cfg.RETURN_WINDOW if cfg.RETURN_WINDOW_INCLUSIVE else gap < cfg.RETURN_WINDOW
 
     def consume(self, key):
         """The return was used: the next crossing is full fare and starts a new window."""

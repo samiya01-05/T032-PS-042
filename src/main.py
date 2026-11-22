@@ -11,8 +11,9 @@ command to the right module:
 At the end it writes decision_log.csv, settlement.csv and tag_events.csv.
 
 Run (from the project root):
-    python -m src.main sample_data output            # uses Member A's src/payment.py
-    python -m src.main sample_data output --stub     # uses the temporary stub engine
+    python -m src.main sample_data output            # PS-042 pack, Member A's src/payment.py
+    python -m src.main data output                   # teachers' reads/recharges/passes pack
+    python -m src.main sample_data output --stub     # temporary stub engine (testing only)
 """
 from __future__ import annotations
 
@@ -87,6 +88,13 @@ def main(argv=None) -> int:
     ap.add_argument("out_dir", help="folder for decision_log.csv, settlement.csv, tag_events.csv")
     ap.add_argument("--stub", action="store_true", help="use the temporary stub engine")
     args = ap.parse_args(argv)
+
+    # A folder with reads.csv but no banks.csv is the teachers' reads/recharges/passes pack.
+    has = lambda name: os.path.isfile(os.path.join(args.data_dir, name))  # noqa: E731
+    if has("reads.csv") and not has("banks.csv"):
+        from src.dataset_runner import run_dataset
+        run_dataset(args.data_dir, args.out_dir)
+        return 0
 
     handler = None
     if args.stub:

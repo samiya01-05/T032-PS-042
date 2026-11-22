@@ -1,43 +1,36 @@
-"""Turns a Result into one decision_log.csv row (17 columns).
+"""Builds one decision_log row (a TxnResult) and its rule_ids string (Member A).
 
-If your README orders or names the columns differently, change COLUMNS only.
+The CSV text itself is produced by Member B's src/writers.py (decision_row).
 """
-from models import Result
+from __future__ import annotations
 
-TS_FORMAT = "%Y-%m-%d %H:%M:%S"
+from decimal import Decimal
+from typing import List
 
-COLUMNS = [
-    "txn_id", "timestamp", "tag_id", "plaza_id", "tag_class", "detected_class",
-    "charged_class", "base_fee", "discount_type", "discount_amount", "penalty",
-    "amount", "payment_mode", "decision", "balance_after", "tag_status_after",
-    "rule_ids",
-]
+from src.models import RULE_SEP, TxnCommand, TxnResult, Tag
+from src.status import GateOutcome
 
-
-def _fmt(v):
-    if hasattr(v, "quantize"):              # Decimal -> always 2 decimals
-        return f"{v:.2f}"
-    return str(v)
+ZERO = Decimal("0.00")
 
 
-def to_row(r: Result) -> list:
-    values = {
-        "txn_id": r.txn_id,
-        "timestamp": r.ts.strftime(TS_FORMAT),
-        "tag_id": r.tag_id,
-        "plaza_id": r.plaza_id,
-        "tag_class": r.tag_class,
-        "detected_class": r.detected_class,
-        "charged_class": r.charged_class,
-        "base_fee": r.base_fee,
-        "discount_type": r.discount_type,
-        "discount_amount": r.discount_amount,
-        "penalty": r.penalty,
-        "amount": r.amount,
-        "payment_mode": r.payment_mode,
-        "decision": r.decision,
-        "balance_after": r.balance_after,
-        "tag_status_after": r.tag_status_after,
-        "rule_ids": r.rule_ids,
-    }
-    return [_fmt(values[c]) for c in COLUMNS]
+def rule_ids(rules: List[str]) -> str:
+    """Rule ids in the order they were applied, without repeats: 'BR-01;BR-05'."""
+    seen = []
+    for r in rules:
+        if r not in seen:
+            seen.append(r)
+    return RULE_SEP.join(seen)
+
+
+def build_result(cmd: TxnCommand, tag: Tag, charged_class: str, base_fee: Decimal,
+                 out: GateOutcome, rules: List[str], discount_type: str = "NONE",
+                 discount_amount: Decimal = ZERO, penalty: Decimal = None) -> TxnResult:
+    """Fill every decision_log field. `penalty` overrides the gate's penalty (used when a
+    mismatch penalty was added to a CHARGED row)."""
+    return TxnResult(
+        txn_id=cmd.txn_id, ts=cmd.ts, plaza_id=cmd.plaza_id, tag_id=tag.tag_id,
+        tag_class=tag.vehicle_class, avc_class=cmd.avc_class, charged_class=charged_class,
+        base_fee=base_fee, discount_type=discount_type, discount_amount=discount_amount,
+        penalty=out.penalty if penalty is None else penalty, amount=out.amount,
+        payment_mode=out.payment_mode, decision=out.decision, balance_after=out.balance_after,
+        tag_status_after=out.status_after, rule_ids=rule_ids(rules), bank_id=tag.issuer_bank)
