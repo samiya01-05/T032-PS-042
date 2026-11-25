@@ -63,3 +63,10 @@ Contract between them: `process_txn(state, cmd) -> TxnResult`.
 ## Rules the brief leaves open
 
 Four choices are named flags in `src/rules_config.py` (teachers' pack: `src/ds_config.py`); each is listed in section 5 of the design document.
+
+
+## Project Demo Video
+
+Watch our FASTag Toll and Violation Engine demonstration:
+
+https://drive.google.com/file/d/1T7eBe8Mbt4p9_CwdXQAkfworQQmNfsq3/view?usp=sharing
